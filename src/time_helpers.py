@@ -2,6 +2,13 @@
 
 import time
 
+# Optional clock sanity check (only if DEBUG enabled)
+_DEBUG = False  # Set to True to enable clock sanity logging
+if _DEBUG:
+    _clock_sanity_ns = time.monotonic_ns()
+    if _clock_sanity_ns <= 0:
+        raise RuntimeError("Monotonic clock returned non-positive value")
+
 
 def now_epoch_ms() -> int:
     """Get current epoch time in milliseconds (wall clock, for exchange→recv latency)."""

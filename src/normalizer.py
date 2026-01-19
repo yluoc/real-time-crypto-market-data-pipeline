@@ -7,13 +7,8 @@ from typing import Any
 
 import msgspec
 
-# Temporary debug: verify import path
-import src.time_helpers as th
-print(f"DEBUG time_helpers import: {th.__file__}")
-# Compare direct vs helper (one-time check)
-_direct_ns = time.monotonic_ns()
-_helper_ns = th.now_mono_ns()
-print(f"DEBUG time.monotonic_ns()={_direct_ns}, now_mono_ns()={_helper_ns}, diff={_direct_ns - _helper_ns}")
+# Debug mode: enable invariant checks
+_DEBUG = True
 
 
 class BookLevel(msgspec.Struct, frozen=True):
@@ -140,25 +135,18 @@ def normalize_okx(ts_recv_epoch_ms: int, ts_recv_mono_ns: int, ts_decoded_mono_n
         )
 
         # Capture processing timestamp IMMEDIATELY after normalization completes (before creating NormalizedEvent)
-        # NOTE: On Windows, time.monotonic_ns() has microsecond precision (values end in 000000).
-        # If normalization completes within the same microsecond as decode, ts_proc_mono_ns will equal
-        # ts_decoded_mono_ns, resulting in 0ns latency. This is expected on Windows.
         ts_proc_mono_ns = time.monotonic_ns()  # direct call for reliability
         
-        # Temporary debug: print timestamps and deltas for first 5 events
-        if not hasattr(normalize_okx, '_debug_count'):
-            normalize_okx._debug_count = 0
-        if normalize_okx._debug_count < 5:
-            recv_to_decode = ts_decoded_mono_ns - ts_recv_mono_ns
-            decode_to_proc = ts_proc_mono_ns - ts_decoded_mono_ns
-            print(f"DEBUG normalize_okx[{normalize_okx._debug_count}]: recv={ts_recv_mono_ns} decoded={ts_decoded_mono_ns} proc={ts_proc_mono_ns} | recv->decode={recv_to_decode}ns decode->proc={decode_to_proc}ns")
-            normalize_okx._debug_count += 1
-        
-        # On Windows, monotonic_ns() only has microsecond precision, so equality is possible
-        if ts_proc_mono_ns < ts_recv_mono_ns:
-            raise RuntimeError(
-                f"recv/proc monotonic order violated: recv={ts_recv_mono_ns} proc={ts_proc_mono_ns}"
-            )
+        # Invariant checks: ensure monotonic clock ordering
+        if _DEBUG:
+            if ts_decoded_mono_ns < ts_recv_mono_ns:
+                raise RuntimeError(
+                    f"Invariant violated: decoded_ns ({ts_decoded_mono_ns}) < recv_ns ({ts_recv_mono_ns})"
+                )
+            if ts_proc_mono_ns < ts_decoded_mono_ns:
+                raise RuntimeError(
+                    f"Invariant violated: proc_ns ({ts_proc_mono_ns}) < decoded_ns ({ts_decoded_mono_ns})"
+                )
 
         events.append(NormalizedEvent(
             exchange="okx",
@@ -190,25 +178,18 @@ def normalize_okx(ts_recv_epoch_ms: int, ts_recv_mono_ns: int, ts_decoded_mono_n
             )
             
             # Capture processing timestamp IMMEDIATELY after normalization completes (before creating NormalizedEvent)
-            # NOTE: On Windows, time.monotonic_ns() has microsecond precision (values end in 000000).
-            # If normalization completes within the same microsecond as decode, ts_proc_mono_ns will equal
-            # ts_decoded_mono_ns, resulting in 0ns latency. This is expected on Windows.
             ts_proc_mono_ns = time.monotonic_ns()  # direct call for reliability
             
-            # Temporary debug: print timestamps and deltas for first 5 events
-            if not hasattr(normalize_okx, '_debug_count'):
-                normalize_okx._debug_count = 0
-            if normalize_okx._debug_count < 5:
-                recv_to_decode = ts_decoded_mono_ns - ts_recv_mono_ns
-                decode_to_proc = ts_proc_mono_ns - ts_decoded_mono_ns
-                print(f"DEBUG normalize_okx[{normalize_okx._debug_count}]: recv={ts_recv_mono_ns} decoded={ts_decoded_mono_ns} proc={ts_proc_mono_ns} | recv->decode={recv_to_decode}ns decode->proc={decode_to_proc}ns")
-                normalize_okx._debug_count += 1
-            
-            # On Windows, monotonic_ns() only has microsecond precision, so equality is possible
-            if ts_proc_mono_ns < ts_recv_mono_ns:
-                raise RuntimeError(
-                    f"recv/proc monotonic order violated: recv={ts_recv_mono_ns} proc={ts_proc_mono_ns}"
-                )
+            # Invariant checks: ensure monotonic clock ordering
+            if _DEBUG:
+                if ts_decoded_mono_ns < ts_recv_mono_ns:
+                    raise RuntimeError(
+                        f"Invariant violated: decoded_ns ({ts_decoded_mono_ns}) < recv_ns ({ts_recv_mono_ns})"
+                    )
+                if ts_proc_mono_ns < ts_decoded_mono_ns:
+                    raise RuntimeError(
+                        f"Invariant violated: proc_ns ({ts_proc_mono_ns}) < decoded_ns ({ts_decoded_mono_ns})"
+                    )
             
             events.append(NormalizedEvent(
                 exchange="okx",

@@ -26,9 +26,10 @@ class RollingMetrics:
         self.window_ms = int(window_seconds * 1000)
         
         # Deques of (timestamp_ms, value) tuples - aggregated across all symbols/channels
-        self.latency_exchange_to_recv: deque[tuple[int, float]] = deque()
-        self.latency_recv_to_decode: deque[tuple[int, float]] = deque()  # Recv→Decode stage (ns)
-        self.latency_decode_to_proc: deque[tuple[int, float]] = deque()  # Decode→Proc stage (ns)
+        # Store all values as integers (ns) to avoid rounding issues
+        self.latency_exchange_to_recv: deque[tuple[int, float]] = deque()  # ms (float OK for epoch domain)
+        self.latency_recv_to_decode: deque[tuple[int, int]] = deque()  # Recv→Decode stage (ns, integer)
+        self.latency_decode_to_proc: deque[tuple[int, int]] = deque()  # Decode→Proc stage (ns, integer)
         
         # Per (symbol, channel) tracking for CSV export
         self.latency_by_key: dict[tuple[str, str], deque[tuple[int, float]]] = {}
@@ -38,8 +39,12 @@ class RollingMetrics:
         # Message counts per symbol
         self.message_counts: dict[str, int] = collections.defaultdict(int)
         
+        # Zero latency counters
+        self.count_zero_recv_to_decode: int = 0
+        self.count_zero_decode_to_proc: int = 0
+        self.total_events: int = 0
+        
         self.last_print_time = time.monotonic()
-        self._debug_event_count = 0  # Temporary DEBUG counter for first 5 events
     
     def update(self, event: NormalizedEvent) -> None:
         """Update metrics with a new event."""
@@ -52,15 +57,18 @@ class RollingMetrics:
         lat_recv_to_decode_ns = event.ts_decoded_mono_ns - event.ts_recv_mono_ns  # monotonic - monotonic, keep as ns
         lat_decode_to_proc_ns = event.ts_proc_mono_ns - event.ts_decoded_mono_ns  # monotonic - monotonic, keep as ns
         
-        # Temporary DEBUG: print raw ns deltas for first 5 events
-        if self._debug_event_count < 5:
-            print(f"DEBUG event {self._debug_event_count}: recv_to_decode_ns={lat_recv_to_decode_ns}, decode_to_proc_ns={lat_decode_to_proc_ns}")
-            self._debug_event_count += 1
+        # Track zero latencies
+        self.total_events += 1
+        if lat_recv_to_decode_ns == 0:
+            self.count_zero_recv_to_decode += 1
+        if lat_decode_to_proc_ns == 0:
+            self.count_zero_decode_to_proc += 1
         
         # Add to rolling windows (use monotonic ms for window timestamps)
+        # Store ns values as integers to preserve precision
         self.latency_exchange_to_recv.append((t_mono_ms, lat_ex_to_recv_ms))
-        self.latency_recv_to_decode.append((t_mono_ms, float(lat_recv_to_decode_ns)))  # Store as float for consistency
-        self.latency_decode_to_proc.append((t_mono_ms, float(lat_decode_to_proc_ns)))  # Store as float for consistency
+        self.latency_recv_to_decode.append((t_mono_ms, lat_recv_to_decode_ns))  # Store as integer (ns)
+        self.latency_decode_to_proc.append((t_mono_ms, lat_decode_to_proc_ns))  # Store as integer (ns)
         
         # Remove old entries
         cutoff_ms = t_mono_ms - self.window_ms
@@ -119,8 +127,8 @@ class RollingMetrics:
         
         # Extract values from rolling windows (use values, not timestamps)
         ex_to_recv_vals = [v for _, v in self.latency_exchange_to_recv]
-        recv_to_decode_vals = [v for _, v in self.latency_recv_to_decode]
-        decode_to_proc_vals = [v for _, v in self.latency_decode_to_proc]
+        recv_to_decode_vals = [float(v) for _, v in self.latency_recv_to_decode]  # Convert int to float for percentile calc
+        decode_to_proc_vals = [float(v) for _, v in self.latency_decode_to_proc]  # Convert int to float for percentile calc
         
         # Only print if we have sufficient samples (avoid misleading 0.0 from empty windows)
         min_samples = 20
@@ -128,20 +136,22 @@ class RollingMetrics:
         
         parts = []
         
-        # Ex->Recv (epoch domain, ms)
+        # Ex→Recv (epoch domain, ms)
         if len(ex_to_recv_vals) >= min_samples:
             ex_to_recv_p50, ex_to_recv_p95, ex_to_recv_p99 = self._percentiles(ex_to_recv_vals, 50, 95, 99)
-            parts.append(f"Ex->Recv: p50={ex_to_recv_p50:.1f}ms p95={ex_to_recv_p95:.1f}ms p99={ex_to_recv_p99:.1f}ms")
+            parts.append(f"Ex→Recv p50={ex_to_recv_p50:.1f}ms p95={ex_to_recv_p95:.1f}ms p99={ex_to_recv_p99:.1f}ms")
         
-        # Recv->Decode (monotonic domain, ns) - stage boundary for Windows microsecond precision
+        # Recv→Decode (monotonic domain, ns) - convert to µs for readability
         if len(recv_to_decode_vals) >= min_samples:
             recv_to_decode_p50, recv_to_decode_p95, recv_to_decode_p99 = self._percentiles(recv_to_decode_vals, 50, 95, 99)
-            parts.append(f"Recv->Decode: p50={recv_to_decode_p50:.0f}ns p95={recv_to_decode_p95:.0f}ns p99={recv_to_decode_p99:.0f}ns")
+            zero_rate_recv_decode = (self.count_zero_recv_to_decode / max(1, self.total_events)) * 100.0
+            parts.append(f"Recv→Decode p50={recv_to_decode_p50/1000.0:.3f}us p95={recv_to_decode_p95/1000.0:.3f}us p99={recv_to_decode_p99/1000.0:.3f}us (zero={zero_rate_recv_decode:.1f}%)")
         
-        # Decode->Proc (monotonic domain, ns) - stage boundary for Windows microsecond precision
+        # Decode→Proc (monotonic domain, ns) - convert to µs for readability
         if len(decode_to_proc_vals) >= min_samples:
             decode_to_proc_p50, decode_to_proc_p95, decode_to_proc_p99 = self._percentiles(decode_to_proc_vals, 50, 95, 99)
-            parts.append(f"Decode->Proc: p50={decode_to_proc_p50:.0f}ns p95={decode_to_proc_p95:.0f}ns p99={decode_to_proc_p99:.0f}ns")
+            zero_rate_decode_proc = (self.count_zero_decode_to_proc / max(1, self.total_events)) * 100.0
+            parts.append(f"Decode→Proc p50={decode_to_proc_p50/1000.0:.3f}us p95={decode_to_proc_p95/1000.0:.3f}us p99={decode_to_proc_p99/1000.0:.3f}us (zero={zero_rate_decode_proc:.1f}%)")
         
         if parts:
             print(f"Metrics | {' | '.join(parts)} | Msgs: {msg_counts_str}")

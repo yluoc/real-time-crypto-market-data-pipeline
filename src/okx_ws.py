@@ -12,14 +12,8 @@ from websockets.exceptions import ConnectionClosed
 
 from src.time_helpers import now_epoch_ms
 
-# Temporary debug: verify import path
-import src.time_helpers as th
-print(f"DEBUG time_helpers import: {th.__file__}")
-# Compare direct vs helper (one-time check)
-_direct_ns = time.monotonic_ns()
-_helper_ns = th.now_mono_ns()
-print(f"DEBUG time.monotonic_ns()={_direct_ns}, now_mono_ns()={_helper_ns}, diff={_direct_ns - _helper_ns}")
-
+# Debug mode: enable invariant checks
+_DEBUG = True
 
 _decoder = msgspec.json.Decoder()
 
@@ -88,18 +82,13 @@ async def okx_stream(
                             continue
                         
                         # Capture decode timestamp IMMEDIATELY after decode completes (before any other processing)
-                        # NOTE: On Windows, time.monotonic_ns() has microsecond precision (values end in 000000).
-                        # If decode completes within the same microsecond as frame receipt, ts_decoded_mono_ns
-                        # will equal ts_recv_mono_ns, resulting in 0ns latency. This is expected on Windows.
                         ts_decoded_mono_ns = time.monotonic_ns()  # direct call for reliability
                         
-                        # Temporary debug: print timestamps for first 5 messages
-                        if not hasattr(okx_stream, '_debug_count'):
-                            okx_stream._debug_count = 0
-                        if okx_stream._debug_count < 5:
-                            recv_to_decode = ts_decoded_mono_ns - ts_recv_mono_ns
-                            print(f"DEBUG okx_ws[{okx_stream._debug_count}]: recv={ts_recv_mono_ns} decoded={ts_decoded_mono_ns} | recv->decode={recv_to_decode}ns")
-                            okx_stream._debug_count += 1
+                        # Invariant check: decoded_ns >= recv_ns (monotonic clock must be non-decreasing)
+                        if _DEBUG and ts_decoded_mono_ns < ts_recv_mono_ns:
+                            raise RuntimeError(
+                                f"Invariant violated: decoded_ns ({ts_decoded_mono_ns}) < recv_ns ({ts_recv_mono_ns})"
+                            )
                             
                         yield (ts_recv_epoch_ms, ts_recv_mono_ns, ts_decoded_mono_ns, msg)
                         
