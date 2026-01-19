@@ -2,8 +2,7 @@
 
 import time
 
-# Optional clock sanity check (only if DEBUG enabled)
-_DEBUG = False  # Set to True to enable clock sanity logging
+_DEBUG = False
 if _DEBUG:
     _clock_sanity_ns = time.monotonic_ns()
     if _clock_sanity_ns <= 0:

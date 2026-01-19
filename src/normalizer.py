@@ -7,7 +7,6 @@ from typing import Any
 
 import msgspec
 
-# Debug mode: enable invariant checks
 _DEBUG = True
 
 
@@ -134,10 +133,8 @@ def normalize_okx(ts_recv_epoch_ms: int, ts_recv_mono_ns: int, ts_decoded_mono_n
             asks=asks,
         )
 
-        # Capture processing timestamp IMMEDIATELY after normalization completes (before creating NormalizedEvent)
-        ts_proc_mono_ns = time.monotonic_ns()  # direct call for reliability
+        ts_proc_mono_ns = time.monotonic_ns()
         
-        # Invariant checks: ensure monotonic clock ordering
         if _DEBUG:
             if ts_decoded_mono_ns < ts_recv_mono_ns:
                 raise RuntimeError(
@@ -177,10 +174,8 @@ def normalize_okx(ts_recv_epoch_ms: int, ts_recv_mono_ns: int, ts_decoded_mono_n
                 trade_id=d.get("tradeId"),
             )
             
-            # Capture processing timestamp IMMEDIATELY after normalization completes (before creating NormalizedEvent)
-            ts_proc_mono_ns = time.monotonic_ns()  # direct call for reliability
+            ts_proc_mono_ns = time.monotonic_ns()
             
-            # Invariant checks: ensure monotonic clock ordering
             if _DEBUG:
                 if ts_decoded_mono_ns < ts_recv_mono_ns:
                     raise RuntimeError(

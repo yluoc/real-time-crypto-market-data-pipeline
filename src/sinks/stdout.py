@@ -13,9 +13,7 @@ class StdoutSink(Sink):
         """Print a compact one-liner with deterministic field ordering."""
         from src.normalizer import BookPayload, TradePayload
         
-        # Compute stage latencies (separate clock domains)
-        lat_ex_to_recv_ms = event.ts_recv_epoch_ms - event.ts_exchange_ms  # epoch - epoch
-        # Internal stage latencies: convert ns to µs for readability
+        lat_ex_to_recv_ms = event.ts_recv_epoch_ms - event.ts_exchange_ms
         lat_recv_to_decode_us = (event.ts_decoded_mono_ns - event.ts_recv_mono_ns) / 1000.0
         lat_decode_to_proc_us = (event.ts_proc_mono_ns - event.ts_decoded_mono_ns) / 1000.0
         

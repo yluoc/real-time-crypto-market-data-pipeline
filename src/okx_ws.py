@@ -12,7 +12,6 @@ from websockets.exceptions import ConnectionClosed
 
 from src.time_helpers import now_epoch_ms
 
-# Debug mode: enable invariant checks
 _DEBUG = True
 
 _decoder = msgspec.json.Decoder()
@@ -81,10 +80,8 @@ async def okx_stream(
                         if not isinstance(msg, dict):
                             continue
                         
-                        # Capture decode timestamp IMMEDIATELY after decode completes (before any other processing)
-                        ts_decoded_mono_ns = time.monotonic_ns()  # direct call for reliability
+                        ts_decoded_mono_ns = time.monotonic_ns()
                         
-                        # Invariant check: decoded_ns >= recv_ns (monotonic clock must be non-decreasing)
                         if _DEBUG and ts_decoded_mono_ns < ts_recv_mono_ns:
                             raise RuntimeError(
                                 f"Invariant violated: decoded_ns ({ts_decoded_mono_ns}) < recv_ns ({ts_recv_mono_ns})"
